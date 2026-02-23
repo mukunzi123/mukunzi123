@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="8" fill="#3b82f6"/>
+  <text x="52%" y="72%" font-family="'Plus Jakarta Sans', sans-serif" font-weight="900" font-size="22" fill="white" text-anchor="middle" font-style="italic" letter-spacing="-1">M</text>
+  <path d="M18 16L13 19V13L18 16Z" fill="white" opacity="0.8"/>
+</svg>

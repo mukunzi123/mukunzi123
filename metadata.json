@@ -1,0 +1,7 @@
+{
+  "name": "Mukunzi Fabien - Premium Movie Portal",
+  "description": "A high-end, Netflix-inspired movie platform by Mukunzi Fabien, featuring secure downloads, advanced search, and a comprehensive admin management system.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
