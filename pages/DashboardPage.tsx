@@ -1,17 +1,73 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { User, Movie } from '../types';
 import { movieService } from '../services/movieService';
 
 interface DashboardPageProps {
   user: User | null;
+  setUser: (user: User | null) => void;
 }
 
-const DashboardPage: React.FC<DashboardPageProps> = ({ user }) => {
+const DashboardPage: React.FC<DashboardPageProps> = ({ user, setUser }) => {
+  const [allMovies, setAllMovies] = useState<Movie[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkDownloading, setIsBulkDownloading] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(0);
+
+  React.useEffect(() => {
+    const fetchMovies = async () => {
+      const data = await movieService.getMovies();
+      setAllMovies(data);
+    };
+    fetchMovies();
+  }, []);
+
   if (!user) return <Navigate to="/login" />;
 
-  const allMovies = movieService.getMovies();
   const downloadedMovies = allMovies.filter(m => user.downloads.includes(m.id));
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkDownload = () => {
+    if (selectedIds.length === 0) return;
+    setIsBulkDownloading(true);
+    setBulkProgress(0);
+
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress += 5;
+      if (progress >= 100) {
+        clearInterval(interval);
+        setBulkProgress(100);
+        setTimeout(() => {
+          setIsBulkDownloading(false);
+          setSelectedIds([]);
+          
+          // Simulate multiple downloads
+          selectedIds.forEach(id => {
+            const movie = allMovies.find(m => m.id === id);
+            if (movie) {
+              const blob = new Blob([`Simulated Bulk Stream Output for ${movie.title}`], { type: 'text/plain' });
+              const url = window.URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${movie.title.replace(/\s+/g, '_')}_Mukunzi_Vault.mp4`;
+              document.body.appendChild(a);
+              a.click();
+              window.URL.revokeObjectURL(url);
+              document.body.removeChild(a);
+            }
+          });
+        }, 500);
+      } else {
+        setBulkProgress(progress);
+      }
+    }, 100);
+  };
 
   return (
     <div className="pt-24 pb-24 bg-[#05070a] min-h-screen">
@@ -67,10 +123,31 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ user }) => {
         </div>
 
         <div className="flex items-center justify-between mb-8 px-2">
-          <h2 className="text-lg font-black uppercase tracking-tighter italic text-white flex items-center gap-3">
-            <i className="fa-solid fa-bolt-lightning text-orange-500 text-sm"></i>
-            Cinema Vault
-          </h2>
+          <div className="flex items-center gap-6">
+            <h2 className="text-lg font-black uppercase tracking-tighter italic text-white flex items-center gap-3">
+              <i className="fa-solid fa-bolt-lightning text-orange-500 text-sm"></i>
+              Cinema Vault
+            </h2>
+            {selectedIds.length > 0 && (
+              <button 
+                onClick={handleBulkDownload}
+                disabled={isBulkDownloading}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-3 shadow-xl shadow-blue-900/20"
+              >
+                {isBulkDownloading ? (
+                  <>
+                    <i className="fa-solid fa-circle-notch animate-spin"></i>
+                    Syncing {bulkProgress}%
+                  </>
+                ) : (
+                  <>
+                    <i className="fa-solid fa-cloud-arrow-down"></i>
+                    Download Selected ({selectedIds.length})
+                  </>
+                )}
+              </button>
+            )}
+          </div>
           <div className="h-[1px] flex-1 mx-6 bg-white/5"></div>
           <span className="text-slate-600 font-black uppercase text-[8px] tracking-widest">{downloadedMovies.length} ARCHIVED</span>
         </div>
@@ -78,8 +155,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ user }) => {
         {downloadedMovies.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
             {downloadedMovies.map(movie => (
-              <div key={movie.id} className="group">
-                <Link to={`/movie/${movie.id}`} className="block relative aspect-video rounded-xl overflow-hidden mb-3 shadow-xl border border-white/5 transition-all group-hover:border-blue-500/50 group-hover:-translate-y-1 duration-300">
+              <div key={movie.id} className="group relative">
+                <div 
+                  onClick={() => toggleSelect(movie.id)}
+                  className={`absolute top-3 left-3 z-10 w-6 h-6 rounded-lg border-2 flex items-center justify-center cursor-pointer transition-all ${selectedIds.includes(movie.id) ? 'bg-blue-600 border-blue-600' : 'bg-black/40 border-white/20 opacity-0 group-hover:opacity-100'}`}
+                >
+                  {selectedIds.includes(movie.id) && <i className="fa-solid fa-check text-white text-[10px]"></i>}
+                </div>
+                <Link to={`/movie/${movie.id}`} className={`block relative aspect-video rounded-xl overflow-hidden mb-3 shadow-xl border transition-all group-hover:-translate-y-1 duration-300 ${selectedIds.includes(movie.id) ? 'border-blue-600 ring-2 ring-blue-600/20' : 'border-white/5 group-hover:border-blue-500/50'}`}>
                   <img src={movie.posterUrl} alt={movie.title} className="w-full h-full object-cover transition-all duration-700" />
                   <div className="absolute inset-0 bg-blue-600/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <i className="fa-solid fa-play text-white text-xl"></i>

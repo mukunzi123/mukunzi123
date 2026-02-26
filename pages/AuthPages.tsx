@@ -43,9 +43,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ type, setUser }) => {
     setIsSubmitting(true);
 
     // Artificial delay for cinematic effect
-    setTimeout(() => {
+    setTimeout(async () => {
       if (type === 'signup') {
-        const user = authService.register(name, email, password);
+        const user = await authService.register(name, email, password);
         if (user) {
           setUser(user);
           navigate('/');
@@ -54,7 +54,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ type, setUser }) => {
           setIsSubmitting(false);
         }
       } else {
-        const user = authService.login(email, password);
+        const user = await authService.login(email, password);
         if (user) {
           setUser(user);
           navigate('/');
@@ -164,7 +164,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({ type, setUser }) => {
           </button>
         </form>
 
-        <div className="mt-12 pt-8 border-t border-white/5 text-center">
+        <div className="mt-12 pt-8 border-t border-white/5 text-center space-y-6">
+          {type === 'login' && (
+            <button 
+              onClick={() => {
+                setEmail('mukunzifabien@gmail.com');
+                setPassword('admin123');
+              }}
+              className="w-full py-3 rounded-xl bg-blue-600/10 border border-blue-500/30 text-blue-500 text-[9px] font-black uppercase tracking-[0.2em] hover:bg-blue-600 hover:text-white transition-all"
+            >
+              <i className="fa-solid fa-shield-halved mr-2"></i> Quick Admin Access
+            </button>
+          )}
           {type === 'login' ? (
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
               Unregistered Operative? <Link to="/signup" className="text-orange-500 font-black hover:text-white transition-colors">Apply for Vault Access</Link>

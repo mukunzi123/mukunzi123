@@ -64,13 +64,13 @@ const App: React.FC = () => {
 
         <main>
           <Routes>
-            <Route path="/" element={<HomePage />} />
+            <Route path="/" element={<HomePage user={user} setUser={setUser} />} />
             <Route path="/movie/:id" element={<MovieDetailPage user={user} setUser={setUser} />} />
-            <Route path="/dashboard" element={<DashboardPage user={user} />} />
+            <Route path="/dashboard" element={<DashboardPage user={user} setUser={setUser} />} />
             {/* STRICT ACCESS GATE: Only authenticated Admin Email can pass */}
             <Route 
               path="/admin" 
-              element={isAdmin ? <AdminPage user={user} /> : <Navigate to="/" replace />} 
+              element={isAdmin ? <AdminPage user={user} setUser={setUser} /> : <Navigate to="/" replace />} 
             />
             <Route path="/legal-hub" element={<LegalHub />} />
             <Route path="/login" element={<Navigate to="/" replace />} />

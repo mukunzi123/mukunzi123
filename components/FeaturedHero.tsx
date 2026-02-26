@@ -8,10 +8,13 @@ const FeaturedHero: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const all = movieService.getMovies();
-    if (all.length > 0) {
-      setMovie(all[0]);
-    }
+    const fetchMovies = async () => {
+      const all = await movieService.getMovies();
+      if (all.length > 0) {
+        setMovie(all[0]);
+      }
+    };
+    fetchMovies();
   }, []);
 
   if (!movie) return null;

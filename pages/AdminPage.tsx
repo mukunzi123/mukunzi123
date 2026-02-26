@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Navigate } from 'react-router-dom';
-import { User, Movie } from '../types';
+import { User, Movie, Comment } from '../types';
 import { movieService } from '../services/movieService';
 import { authService } from '../services/authService';
 import { geminiService } from '../services/geminiService';
@@ -9,25 +9,33 @@ import { GENRES } from '../constants';
 
 interface AdminPageProps {
   user: User | null;
+  setUser: (user: User | null) => void;
 }
 
-type AdminView = 'dashboard' | 'films' | 'users';
+type AdminView = 'dashboard' | 'films' | 'comments' | 'users';
 
-const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
+const AdminPage: React.FC<AdminPageProps> = ({ user, setUser }) => {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [allComments, setAllComments] = useState<Comment[]>([]);
+  const [adminStats, setAdminStats] = useState<any>(null);
   const [currentView, setCurrentView] = useState<AdminView>('dashboard');
   const [showModal, setShowModal] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
   const [selectedMovieIds, setSelectedMovieIds] = useState<string[]>([]);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   // Filtering & Pagination
   const [searchQuery, setSearchQuery] = useState('');
   const [filterGenre, setFilterGenre] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
+
+  // Comment filters
+  const [commentFilter, setCommentFilter] = useState<'All' | 'Pending' | 'Approved' | 'Hidden'>('All');
 
   // Notifications
   const [notifications, setNotifications] = useState<{id: number, text: string, type: 'success' | 'error'}[]>([]);
@@ -37,17 +45,40 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
     description: '',
     category: 'Action',
     year: new Date().getFullYear(),
+    releaseDate: new Date().toISOString().split('T')[0],
     posterUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&q=80&w=1000',
     trailerUrl: '',
+    videoUrl: '',
+    director: '',
+    country: '',
     fileSize: '1.8 GB',
     quality: 'Full HD' as '4K' | 'Full HD' | 'HD',
     status: 'Online' as 'Online' | 'Offline'
   });
 
   useEffect(() => {
-    setMovies(movieService.getMovies());
-    setUsers(authService.getUsers());
+    fetchInitialData();
   }, []);
+
+  const fetchInitialData = async () => {
+    setIsLoadingStats(true);
+    try {
+      const [moviesData, usersData, commentsData, statsData] = await Promise.all([
+        movieService.getMovies(),
+        authService.getUsers(),
+        movieService.getAllComments(),
+        movieService.getAdminStats()
+      ]);
+      setMovies(moviesData);
+      setUsers(usersData);
+      setAllComments(commentsData);
+      setAdminStats(statsData);
+    } catch (error) {
+      console.error("Error fetching admin data:", error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
 
   const addNotification = (text: string, type: 'success' | 'error' = 'success') => {
     const id = Date.now();
@@ -65,6 +96,11 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
     });
   }, [movies, searchQuery, filterGenre]);
 
+  const filteredComments = useMemo(() => {
+    if (commentFilter === 'All') return allComments;
+    return allComments.filter(c => c.status === commentFilter);
+  }, [allComments, commentFilter]);
+
   const paginatedMovies = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredMovies.slice(start, start + itemsPerPage);
@@ -77,11 +113,47 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
     return {
       movies: movies.length,
       users: users.length,
-      downloads: totalDownloads
+      downloads: totalDownloads,
+      comments: allComments.length,
+      pendingComments: allComments.filter(c => c.status === 'Pending').length
     };
-  }, [movies, users]);
+  }, [movies, users, allComments]);
 
   if (!user || user.role !== 'admin') return <Navigate to="/" />;
+
+  const handleLogout = () => {
+    authService.logout();
+    setUser(null);
+  };
+
+  const handleUpdateCommentStatus = async (id: number, status: 'Approved' | 'Hidden') => {
+    try {
+      const result = await movieService.updateCommentStatus(id, status);
+      if (result.comment) {
+        setAllComments(prev => prev.map(c => c.id === id ? result.comment : c));
+        addNotification(`Comment ${status}`);
+        // Refresh stats
+        const newStats = await movieService.getAdminStats();
+        setAdminStats(newStats);
+      }
+    } catch (error) {
+      addNotification('Failed to update comment', 'error');
+    }
+  };
+
+  const handleDeleteComment = async (id: number) => {
+    if (!window.confirm('Erase this operative feedback from the permanent record?')) return;
+    try {
+      await movieService.deleteComment(id);
+      setAllComments(prev => prev.filter(c => c.id !== id));
+      addNotification('Comment Erased');
+      // Refresh stats
+      const newStats = await movieService.getAdminStats();
+      setAdminStats(newStats);
+    } catch (error) {
+      addNotification('Failed to delete comment', 'error');
+    }
+  };
 
   const handleEnhance = async () => {
     if (!formData.title) return addNotification('Enter a title first', 'error');
@@ -103,8 +175,12 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
       description: '',
       category: 'Action',
       year: new Date().getFullYear(),
+      releaseDate: new Date().toISOString().split('T')[0],
       posterUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&q=80&w=1000',
       trailerUrl: '',
+      videoUrl: '',
+      director: '',
+      country: '',
       fileSize: '1.8 GB',
       quality: 'Full HD',
       status: 'Online'
@@ -119,8 +195,12 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
       description: movie.description,
       category: movie.category,
       year: movie.year,
+      releaseDate: movie.releaseDate || new Date().toISOString().split('T')[0],
       posterUrl: movie.posterUrl,
       trailerUrl: movie.trailerUrl,
+      videoUrl: movie.videoUrl || '',
+      director: movie.director || '',
+      country: movie.country || '',
       fileSize: movie.fileSize,
       quality: movie.quality,
       status: movie.status || 'Online'
@@ -128,52 +208,59 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
     setShowModal(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsDeploying(true);
     
-    setTimeout(() => {
+    try {
       if (editingId) {
-        const updated = movieService.updateMovie(editingId, formData);
+        const updated = await movieService.updateMovie(editingId, formData);
         if (updated) {
           setMovies(movies.map(m => m.id === editingId ? updated : m));
           addNotification('Asset Record Updated');
         }
       } else {
-        const newMovie = movieService.addMovie({ ...formData, popularity: 50 });
+        const newMovie = await movieService.addMovie({ ...formData, popularity: 50 });
         setMovies([newMovie, ...movies]);
         addNotification('New Asset Successfully Deployed');
       }
-      setIsDeploying(false);
       setShowModal(false);
-    }, 1000);
+    } catch (error) {
+      addNotification('Deployment Failed', 'error');
+    } finally {
+      setIsDeploying(false);
+    }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Erase this cinematic node from the permanent record?')) {
-      movieService.deleteMovie(id);
+      await movieService.deleteMovie(id);
       setMovies(movies.filter(m => m.id !== id));
       setSelectedMovieIds(prev => prev.filter(selectedId => selectedId !== id));
       addNotification('Asset Erased from Vault');
     }
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     if (selectedMovieIds.length === 0) return;
     if (window.confirm(`Erase ${selectedMovieIds.length} cinematic nodes from the permanent record?`)) {
-      movieService.bulkDeleteMovies(selectedMovieIds);
+      await movieService.bulkDeleteMovies(selectedMovieIds);
       setMovies(movies.filter(m => !selectedMovieIds.includes(m.id)));
       setSelectedMovieIds([]);
       addNotification(`${selectedMovieIds.length} Assets Erased from Vault`);
     }
   };
 
-  const handleBulkStatusUpdate = (status: 'Online' | 'Offline') => {
+  const handleBulkStatusUpdate = async (status: 'Online' | 'Offline') => {
     if (selectedMovieIds.length === 0) return;
-    movieService.bulkUpdateStatus(selectedMovieIds, status);
+    await movieService.bulkUpdateStatus(selectedMovieIds, status);
     setMovies(movies.map(m => selectedMovieIds.includes(m.id) ? { ...m, status } : m));
     setSelectedMovieIds([]);
     addNotification(`Bulk Status Update: ${status}`);
+  };
+
+  const handleResetVault = () => {
+    addNotification('Reset not supported in Server Mode', 'error');
   };
 
   const toggleSelectAll = () => {
@@ -190,9 +277,21 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
     );
   };
 
+  const handleDeleteUser = async (id: string, name: string) => {
+    if (id === user?.id) return addNotification('Cannot terminate own session', 'error');
+    if (window.confirm(`Permanently erase operative ${name} from the registry?`)) {
+      await authService.deleteUser(id);
+      setUsers(prev => prev.filter(u => u.id !== id));
+      addNotification(`Operative ${name} Erased`);
+    }
+  };
+
   const SidebarItem = ({ id, icon, label }: { id: AdminView, icon: string, label: string }) => (
     <button
-      onClick={() => setCurrentView(id)}
+      onClick={() => {
+        setCurrentView(id);
+        setIsMobileMenuOpen(false);
+      }}
       className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all ${currentView === id ? 'bg-blue-600 text-white shadow-xl shadow-blue-900/40' : 'text-slate-500 hover:text-white hover:bg-white/5'}`}
     >
       <i className={`fa-solid ${icon} text-lg w-6`}></i>
@@ -202,6 +301,14 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
 
   return (
     <div className="flex bg-[#05070a] min-h-screen relative">
+      {/* Mobile Menu Toggle */}
+      <button 
+        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        className="lg:hidden fixed top-6 right-6 z-[130] w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-xl"
+      >
+        <i className={`fa-solid ${isMobileMenuOpen ? 'fa-xmark' : 'fa-bars'}`}></i>
+      </button>
+
       {/* Toast Notifications */}
       <div className="fixed top-24 right-8 z-[120] flex flex-col gap-4">
         {notifications.map(n => (
@@ -212,7 +319,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
         ))}
       </div>
 
-      <aside className="w-80 border-r border-white/5 pt-32 pb-12 px-6 flex flex-col hidden lg:flex fixed h-full z-20 bg-[#05070a]">
+      <aside className={`w-80 border-r border-white/5 pt-32 pb-12 px-6 flex flex-col fixed h-full z-[120] bg-[#05070a] transition-transform duration-500 lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="mb-12 px-6">
           <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.5em] block mb-2">Command Center</span>
           <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">Admin Portal</h2>
@@ -221,8 +328,19 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
         <nav className="flex-1 space-y-3">
           <SidebarItem id="dashboard" icon="fa-chart-simple" label="Platform Metrics" />
           <SidebarItem id="films" icon="fa-film" label="Asset Management" />
+          <SidebarItem id="comments" icon="fa-comments" label="Operative Feedback" />
           <SidebarItem id="users" icon="fa-user-lock" label="Access Control" />
         </nav>
+
+        <div className="mt-8 mb-8">
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-500 hover:text-orange-500 hover:bg-orange-500/5 transition-all"
+          >
+            <i className="fa-solid fa-right-from-bracket text-lg w-6"></i>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Terminate Session</span>
+          </button>
+        </div>
 
         <div className="mt-auto p-6 bg-[#11141b] rounded-3xl border border-white/5">
            <div className="flex items-center gap-3 mb-4">
@@ -260,6 +378,12 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
                     <option value="All">All Sectors</option>
                     {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
+                  <button 
+                    onClick={handleResetVault}
+                    className="bg-orange-600/10 border border-orange-500/30 text-orange-500 px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-600 hover:text-white transition-all"
+                  >
+                    <i className="fa-solid fa-rotate-left mr-2"></i> Reset Vault
+                  </button>
                 </div>
               </div>
               <button 
@@ -419,31 +543,166 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
               <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Global metrics and node health</p>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-               <div className="bg-[#11141b] p-10 rounded-[40px] border border-white/5">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+               <div className="bg-[#11141b] p-10 rounded-[40px] border border-white/5 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 transition-all group-hover:scale-150"></div>
                   <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mb-4">Total Vault Nodes</p>
                   <h3 className="text-5xl font-black text-blue-500 italic tracking-tighter">{stats.movies}</h3>
                </div>
-               <div className="bg-[#11141b] p-10 rounded-[40px] border border-white/5">
+               <div className="bg-[#11141b] p-10 rounded-[40px] border border-white/5 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-orange-600/5 rounded-full -mr-12 -mt-12 transition-all group-hover:scale-150"></div>
                   <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mb-4">Authorized Operatives</p>
                   <h3 className="text-5xl font-black text-orange-500 italic tracking-tighter">{stats.users}</h3>
                </div>
-               <div className="bg-[#11141b] p-10 rounded-[40px] border border-white/5">
+               <div className="bg-[#11141b] p-10 rounded-[40px] border border-white/5 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-green-600/5 rounded-full -mr-12 -mt-12 transition-all group-hover:scale-150"></div>
                   <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mb-4">Successful Retrievals</p>
                   <h3 className="text-5xl font-black text-green-500 italic tracking-tighter">{stats.downloads}</h3>
                </div>
+               <div className="bg-[#11141b] p-10 rounded-[40px] border border-white/5 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-purple-600/5 rounded-full -mr-12 -mt-12 transition-all group-hover:scale-150"></div>
+                  <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mb-4">Operative Feedback</p>
+                  <div className="flex items-end gap-3">
+                    <h3 className="text-5xl font-black text-purple-500 italic tracking-tighter">{stats.comments}</h3>
+                    {stats.pendingComments > 0 && (
+                      <span className="mb-2 px-2 py-1 bg-purple-600 text-white text-[7px] font-black rounded-full animate-pulse">
+                        {stats.pendingComments} PENDING
+                      </span>
+                    )}
+                  </div>
+               </div>
             </div>
 
-            <div className="mt-12 p-10 bg-[#11141b] rounded-[40px] border border-white/5">
-                <h4 className="text-xs font-black text-white uppercase tracking-[0.4em] mb-6 italic">Recent System Events</h4>
-                <div className="space-y-4">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="flex items-center gap-4 py-3 border-b border-white/5 last:border-0">
-                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Node Synchronized: Cinematic asset deployment successfully verified at {new Date().toLocaleTimeString()} GMT</p>
-                    </div>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-12 mt-12">
+              <div className="p-10 bg-[#11141b] rounded-[40px] border border-white/5">
+                  <h4 className="text-xs font-black text-white uppercase tracking-[0.4em] mb-8 italic flex items-center gap-3">
+                    <i className="fa-solid fa-signal text-blue-500"></i> Recent System Events
+                  </h4>
+                  <div className="space-y-6">
+                    {[1, 2, 3, 4].map(i => (
+                      <div key={i} className="flex items-start gap-4 py-4 border-b border-white/5 last:border-0">
+                        <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5"></div>
+                        <div className="flex flex-col">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Node Synchronized: Cinematic asset deployment successfully verified at {new Date(Date.now() - i * 3600000).toLocaleTimeString()} GMT</p>
+                          <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest mt-1">System Kernel v2.5.4</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+              </div>
+
+              <div className="p-10 bg-[#11141b] rounded-[40px] border border-white/5">
+                  <h4 className="text-xs font-black text-white uppercase tracking-[0.4em] mb-8 italic flex items-center gap-3">
+                    <i className="fa-solid fa-users-viewfinder text-orange-500"></i> Top Operatives
+                  </h4>
+                  <div className="space-y-6">
+                    {users.slice(0, 4).map((u, i) => (
+                      <div key={u.id} className="flex items-center justify-between py-4 border-b border-white/5 last:border-0">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-orange-500 p-0.5">
+                            <div className="w-full h-full rounded-[9px] bg-[#05070a] flex items-center justify-center text-xs font-black text-white">
+                              {u.name[0]}
+                            </div>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[11px] font-black text-white uppercase italic tracking-tight">{u.name}</span>
+                            <span className="text-[8px] font-bold text-slate-600 uppercase tracking-widest">{u.email}</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] font-black text-orange-500 italic tracking-tighter block">{u.downloads?.length || 0} Assets</span>
+                          <span className="text-[7px] font-black text-slate-700 uppercase tracking-widest">Retrievals</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {currentView === 'comments' && (
+          <div className="animate-in fade-in duration-700">
+             <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-8 mb-12">
+               <div>
+                <h1 className="text-4xl font-black text-white uppercase italic tracking-tighter mb-2">Operative Feedback</h1>
+                <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-6">Moderate tactical assessments from the field</p>
+                <div className="flex flex-wrap gap-4">
+                  {(['All', 'Pending', 'Approved', 'Hidden'] as const).map(f => (
+                    <button 
+                      key={f}
+                      onClick={() => setCommentFilter(f)}
+                      className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${commentFilter === f ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-white/5 border-white/10 text-slate-500 hover:text-white'}`}
+                    >
+                      {f}
+                    </button>
                   ))}
                 </div>
+              </div>
+            </div>
+
+            <div className="bg-[#11141b] rounded-[40px] border border-white/5 overflow-hidden shadow-2xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-[#05070a]/50 text-slate-500 text-[9px] uppercase font-black tracking-[0.4em] border-b border-white/5">
+                      <th className="px-10 py-8">Operative</th>
+                      <th className="px-10 py-8">Tactical Assessment</th>
+                      <th className="px-10 py-8">Target Node</th>
+                      <th className="px-10 py-8">Status</th>
+                      <th className="px-10 py-8 text-right">Ops</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {filteredComments.length > 0 ? filteredComments.map(c => {
+                      const movie = movies.find(m => m.id === c.video_id);
+                      return (
+                        <tr key={c.id} className="hover:bg-blue-500/5 transition-colors group">
+                          <td className="px-10 py-8">
+                            <div className="flex items-center gap-4">
+                              <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-[10px] font-black text-slate-400">
+                                {c.username[0]}
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="font-black text-white uppercase italic tracking-tight">{c.username}</span>
+                                <span className="text-[8px] font-bold text-slate-600 uppercase tracking-widest">{c.email || 'No Email'} • {new Date(c.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-10 py-8 max-w-xs">
+                            <p className="text-slate-400 text-[10px] font-medium italic leading-relaxed line-clamp-2">{c.comment_text}</p>
+                          </td>
+                          <td className="px-10 py-8">
+                            <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest">{movie?.title || 'Unknown Node'}</span>
+                          </td>
+                          <td className="px-10 py-8">
+                            <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase tracking-widest border ${c.status === 'Approved' ? 'bg-green-600/20 text-green-500 border-green-500/20' : c.status === 'Hidden' ? 'bg-orange-600/20 text-orange-500 border-orange-500/20' : 'bg-slate-800 text-slate-400 border-white/5'}`}>
+                              {c.status}
+                            </span>
+                          </td>
+                          <td className="px-10 py-8 text-right">
+                            <div className="flex justify-end gap-3">
+                              {c.status !== 'Approved' && (
+                                <button onClick={() => handleUpdateCommentStatus(c.id, 'Approved')} className="w-8 h-8 rounded-lg bg-green-600/10 flex items-center justify-center text-green-500 hover:bg-green-600 hover:text-white transition-all border border-green-500/20" title="Approve"><i className="fa-solid fa-check text-[10px]"></i></button>
+                              )}
+                              {c.status !== 'Hidden' && (
+                                <button onClick={() => handleUpdateCommentStatus(c.id, 'Hidden')} className="w-8 h-8 rounded-lg bg-orange-600/10 flex items-center justify-center text-orange-500 hover:bg-orange-600 hover:text-white transition-all border border-orange-500/20" title="Hide"><i className="fa-solid fa-eye-slash text-[10px]"></i></button>
+                              )}
+                              <button onClick={() => handleDeleteComment(c.id)} className="w-8 h-8 rounded-lg bg-red-600/10 flex items-center justify-center text-red-500 hover:bg-red-600 hover:text-white transition-all border border-red-500/20" title="Delete"><i className="fa-solid fa-trash-can text-[10px]"></i></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }) : (
+                      <tr>
+                        <td colSpan={5} className="px-10 py-24 text-center">
+                           <p className="text-slate-600 text-[10px] font-black uppercase tracking-[0.5em]">No feedback records found</p>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -464,6 +723,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
                       <th className="px-10 py-8">Authorization Level</th>
                       <th className="px-10 py-8">Retrieval History</th>
                       <th className="px-10 py-8">Registry Date</th>
+                      <th className="px-10 py-8 text-right">Ops</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
@@ -485,6 +745,17 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
                         </td>
                         <td className="px-10 py-8 text-slate-500 font-bold text-xs">
                           {new Date(u.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="px-10 py-8 text-right">
+                          {u.id !== user?.id && (
+                            <button 
+                              onClick={() => handleDeleteUser(u.id, u.name)}
+                              className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-slate-500 hover:text-red-500 transition-all border border-white/5"
+                              title="Erase Operative"
+                            >
+                              <i className="fa-solid fa-user-minus text-xs"></i>
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -540,8 +811,20 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
                   </div>
 
                   <div className="space-y-4">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] ml-2">Deployment Era (Year)</label>
-                    <input type="number" value={formData.year} onChange={e => setFormData({...formData, year: parseInt(e.target.value)})} className="w-full bg-black/50 border border-white/5 rounded-2xl px-8 py-5 text-white outline-none font-bold italic" />
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] ml-2">Deployment Era (Release Date)</label>
+                    <input 
+                      type="date" 
+                      value={formData.releaseDate} 
+                      onChange={e => {
+                        const date = e.target.value;
+                        setFormData({
+                          ...formData, 
+                          releaseDate: date,
+                          year: new Date(date).getFullYear() || formData.year
+                        });
+                      }} 
+                      className="w-full bg-black/50 border border-white/5 rounded-2xl px-8 py-5 text-white outline-none font-bold italic" 
+                    />
                   </div>
 
                   <div className="space-y-4">
@@ -576,8 +859,68 @@ const AdminPage: React.FC<AdminPageProps> = ({ user }) => {
                     <input type="text" value={formData.posterUrl} onChange={e => setFormData({...formData, posterUrl: e.target.value})} className="w-full bg-black/50 border border-white/5 rounded-2xl px-8 py-4 text-white outline-none text-[10px] font-mono" />
                   </div>
                   <div className="space-y-4">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] ml-2">Trailer Node (Embed)</label>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] ml-2">Trailer URL (YouTube Embed)</label>
                     <input type="text" value={formData.trailerUrl} onChange={e => setFormData({...formData, trailerUrl: e.target.value})} className="w-full bg-black/50 border border-white/5 rounded-2xl px-8 py-4 text-white outline-none text-[10px] font-mono" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] ml-2">Director / Creator</label>
+                    <input type="text" value={formData.director} onChange={e => setFormData({...formData, director: e.target.value})} className="w-full bg-black/50 border border-white/5 rounded-2xl px-8 py-5 text-white outline-none font-bold italic" placeholder="e.g. Christopher Nolan" />
+                  </div>
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] ml-2">Country of Origin</label>
+                    <input type="text" value={formData.country} onChange={e => setFormData({...formData, country: e.target.value})} className="w-full bg-black/50 border border-white/5 rounded-2xl px-8 py-5 text-white outline-none font-bold italic" placeholder="e.g. USA" />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] ml-2">Main Video Source (URL or Upload)</label>
+                  <div className="flex gap-3">
+                    <input 
+                      type="text" 
+                      value={formData.videoUrl} 
+                      onChange={e => setFormData({...formData, videoUrl: e.target.value})} 
+                      className="flex-1 bg-black/50 border border-white/5 rounded-2xl px-8 py-4 text-white outline-none text-[10px] font-mono" 
+                      placeholder="Direct link or YouTube embed" 
+                    />
+                    <label className="bg-white/5 hover:bg-white/10 border border-white/10 px-6 rounded-2xl flex items-center justify-center cursor-pointer transition-all">
+                      <i className="fa-solid fa-upload text-slate-400"></i>
+                      <input 
+                        type="file" 
+                        className="hidden" 
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const formDataUpload = new FormData();
+                            formDataUpload.append('file', file);
+                            
+                            addNotification('Uploading asset...', 'success');
+                            try {
+                              const response = await fetch('/api/admin/upload', {
+                                method: 'POST',
+                                body: formDataUpload
+                              });
+                              
+                              if (response.ok) {
+                                const data = await response.json();
+                                setFormData({
+                                  ...formData, 
+                                  videoUrl: data.url, 
+                                  fileSize: `${(file.size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+                                });
+                                addNotification(`Asset "${file.name}" successfully deployed to vault`);
+                              } else {
+                                throw new Error('Upload failed');
+                              }
+                            } catch (error) {
+                              addNotification('Upload failed. Check server logs.', 'error');
+                            }
+                          }
+                        }}
+                      />
+                    </label>
                   </div>
                 </div>
 

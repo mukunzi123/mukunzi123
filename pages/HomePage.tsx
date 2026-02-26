@@ -2,12 +2,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { movieService } from '../services/movieService';
 import { geminiService } from '../services/geminiService';
-import { Movie } from '../types';
+import { Movie, User } from '../types';
 import FeaturedHero from '../components/FeaturedHero';
 import MovieRow from '../components/MovieRow';
 import { GENRES } from '../constants';
 
-const HomePage: React.FC = () => {
+interface HomePageProps {
+  user: User | null;
+  setUser: (user: User | null) => void;
+}
+
+const HomePage: React.FC<HomePageProps> = ({ user, setUser }) => {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('All');
@@ -15,7 +20,11 @@ const HomePage: React.FC = () => {
   const [webResults, setWebResults] = useState<any[]>([]);
 
   useEffect(() => {
-    setMovies(movieService.getMovies());
+    const fetchMovies = async () => {
+      const data = await movieService.getMovies();
+      setMovies(data);
+    };
+    fetchMovies();
   }, []);
 
   const filteredMovies = useMemo(() => {
@@ -131,11 +140,11 @@ const HomePage: React.FC = () => {
       <div className="space-y-4">
         {searchQuery ? (
           // Search view shows a single filtered row or grid
-          <MovieRow title={`Search Results: ${searchQuery}`} movies={filteredMovies} />
+          <MovieRow title={`Search Results: ${searchQuery}`} movies={filteredMovies} user={user} setUser={setUser} />
         ) : (
           // Standard Sector View
           <>
-            <MovieRow title={selectedGenre === 'All' ? "🎬 All Master Archive" : `🎬 ${selectedGenre} Archive`} movies={filteredMovies} />
+            <MovieRow title={selectedGenre === 'All' ? "🎬 All Master Archive" : `🎬 ${selectedGenre} Archive`} movies={filteredMovies} user={user} setUser={setUser} />
             
             {activeSectors.map(sector => {
               const icon = genreIcons[sector] || "📂";
@@ -144,6 +153,8 @@ const HomePage: React.FC = () => {
                   key={sector} 
                   title={`${icon} ${sector} Sector`} 
                   movies={movies.filter(m => m.category === sector)} 
+                  user={user}
+                  setUser={setUser}
                 />
               );
             })}

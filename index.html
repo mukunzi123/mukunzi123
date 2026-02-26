@@ -71,16 +71,28 @@
 
         /* Video Performance Constraints & Enhancement */
         .video-container-constrained {
-            max-height: 65vh;
-            max-width: 1400px;
+            width: 100%;
+            aspect-ratio: 16 / 9;
             margin-left: auto;
             margin-right: auto;
             background: #000;
             position: relative;
             overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.05);
             box-shadow: 0 30px 60px -12px rgba(0,0,0,0.5);
             will-change: transform;
+        }
+
+        @media (min-width: 1024px) {
+            .video-container-constrained {
+                width: 100vw;
+                max-height: 90vh; /* Ensure it doesn't overflow height too much while keeping ratio */
+            }
+        }
+
+        @media (max-width: 1023px) {
+            .video-container-constrained {
+                width: 100vw;
+            }
         }
 
         /* Cinematic Processing Simulation */

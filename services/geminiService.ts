@@ -31,6 +31,8 @@ export const geminiService = {
         - description (engaging and cinematic)
         - category (Action, Adventure, Sci-Fi, Horror, Comedy, Drama, Thriller, Animation, Fantasy)
         - year (accurate release year)
+        - director (name of the director)
+        - country (country of origin)
         - fileSize (estimate, e.g., 2.4 GB)
         - quality (4K, Full HD, or HD)`,
         config: {
@@ -41,11 +43,13 @@ export const geminiService = {
               description: { type: Type.STRING },
               category: { type: Type.STRING },
               year: { type: Type.INTEGER },
+              director: { type: Type.STRING },
+              country: { type: Type.STRING },
               fileSize: { type: Type.STRING },
               quality: { type: Type.STRING },
               trailerUrl: { type: Type.STRING, description: "Official YouTube embed URL" }
             },
-            required: ["description", "category", "year", "fileSize", "trailerUrl"]
+            required: ["description", "category", "year", "fileSize", "trailerUrl", "director", "country"]
           }
         }
       }));

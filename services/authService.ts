@@ -5,37 +5,33 @@ const CURRENT_USER_KEY = 'cineflow_current_user';
 const ADMIN_EMAIL = 'mukunzifabien@gmail.com';
 
 export const authService = {
-  getUsers: (): User[] => {
-    const stored = localStorage.getItem(USERS_KEY);
-    return stored ? JSON.parse(stored) : [];
+  getUsers: async (): Promise<User[]> => {
+    const response = await fetch('/api/admin/users');
+    return response.json();
   },
 
-  register: (name: string, email: string, password: string): User | null => {
-    const users = authService.getUsers();
-    if (users.find(u => u.email === email)) return null;
-
-    const newUser: User = {
-      id: Date.now().toString(),
-      name,
-      email,
-      role: email.toLowerCase() === ADMIN_EMAIL ? 'admin' : 'user',
-      downloads: [],
-      createdAt: Date.now()
-    };
-
-    localStorage.setItem(USERS_KEY, JSON.stringify([...users, newUser]));
-    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(newUser));
-    return newUser;
+  register: async (name: string, email: string, password: string): Promise<User | null> => {
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password })
+    });
+    if (response.ok) {
+      const user = await response.json();
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+      return user;
+    }
+    return null;
   },
 
-  login: (email: string, password: string): User | null => {
-    const users = authService.getUsers();
-    const user = users.find(u => u.email === email);
-    if (user) {
-      // Refresh admin role if email matches (in case it was changed)
-      if (user.email.toLowerCase() === ADMIN_EMAIL) {
-        user.role = 'admin';
-      }
+  login: async (email: string, password: string): Promise<User | null> => {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (response.ok) {
+      const user = await response.json();
       localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
       return user;
     }
@@ -48,26 +44,28 @@ export const authService = {
 
   getCurrentUser: (): User | null => {
     const stored = localStorage.getItem(CURRENT_USER_KEY);
-    const user = stored ? JSON.parse(stored) : null;
-    if (user && user.email.toLowerCase() === ADMIN_EMAIL) {
-      user.role = 'admin';
-    }
-    return user;
+    return stored ? JSON.parse(stored) : null;
   },
 
-  recordDownload: (movieId: string): User | null => {
+  recordDownload: async (movieId: string): Promise<User | null> => {
     const currentUser = authService.getCurrentUser();
     if (!currentUser) return null;
 
-    const users = authService.getUsers();
-    const userIndex = users.findIndex(u => u.id === currentUser.id);
-    if (userIndex === -1) return null;
-
-    if (!users[userIndex].downloads.includes(movieId)) {
-      users[userIndex].downloads.push(movieId);
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(users[userIndex]));
+    const response = await fetch(`/api/users/${currentUser.id}/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ movieId })
+    });
+    
+    if (response.ok) {
+      const user = await response.json();
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+      return user;
     }
-    return users[userIndex];
+    return null;
+  },
+
+  deleteUser: async (id: string): Promise<void> => {
+    await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
   }
 };

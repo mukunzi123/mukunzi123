@@ -1,14 +1,16 @@
 
 import React, { useRef } from 'react';
-import { Movie } from '../types';
+import { Movie, User } from '../types';
 import MovieCard from './MovieCard';
 
 interface MovieRowProps {
   title: string;
   movies: Movie[];
+  user: User | null;
+  setUser: (user: User | null) => void;
 }
 
-const MovieRow: React.FC<MovieRowProps> = ({ title, movies }) => {
+const MovieRow: React.FC<MovieRowProps> = ({ title, movies, user, setUser }) => {
   const rowRef = useRef<HTMLDivElement>(null);
 
   const scroll = (direction: 'left' | 'right') => {
@@ -53,7 +55,7 @@ const MovieRow: React.FC<MovieRowProps> = ({ title, movies }) => {
       >
         {movies.map(movie => (
           <div key={movie.id} className="min-w-[280px] md:min-w-[360px] transform transition-all duration-300">
-            <MovieCard movie={movie} />
+            <MovieCard movie={movie} user={user} setUser={setUser} />
           </div>
         ))}
       </div>

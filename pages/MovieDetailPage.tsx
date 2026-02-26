@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { movieService } from '../services/movieService';
 import { authService } from '../services/authService';
 import { geminiService } from '../services/geminiService';
-import { Movie, User } from '../types';
+import { Movie, User, Comment } from '../types';
 
 interface MovieDetailPageProps {
   user: User | null;
@@ -22,22 +22,76 @@ const MovieDetailPage: React.FC<MovieDetailPageProps> = ({ user, setUser }) => {
   const [searchingSources, setSearchingSources] = useState(false);
   const [selectedQuality, setSelectedQuality] = useState<Resolution>('1080p');
   const [isCinematicMode, setIsCinematicMode] = useState(true);
+  const [views, setViews] = useState<number>(0);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     window.scrollTo(0, 0);
     if (id) {
-      const found = movieService.getMovieById(id);
-      if (found) {
-        setMovie(found);
-        fetchLegalSources(found.title);
-        // Detect high-res screens
-        if (window.devicePixelRatio > 1.5) {
-          setSelectedQuality('4K');
+      const fetchMovie = async () => {
+        const found = await movieService.getMovieById(id);
+        if (found) {
+          setMovie(found);
+          fetchLegalSources(found.title);
+          fetchViewsAndComments(id);
+          incrementViewCount(id);
+          // Detect high-res screens
+          if (window.devicePixelRatio > 1.5) {
+            setSelectedQuality('4K');
+          }
         }
-      }
+      };
+      fetchMovie();
     }
   }, [id]);
+
+  const fetchViewsAndComments = async (videoId: string) => {
+    try {
+      const [v, c] = await Promise.all([
+        movieService.getViews(videoId),
+        movieService.getComments(videoId)
+      ]);
+      setViews(v);
+      setComments(c);
+    } catch (error) {
+      console.error("Error fetching views/comments:", error);
+    }
+  };
+
+  const incrementViewCount = async (videoId: string) => {
+    try {
+      await movieService.incrementViews(videoId);
+      const updatedViews = await movieService.getViews(videoId);
+      setViews(updatedViews);
+    } catch (error) {
+      console.error("Error incrementing views:", error);
+    }
+  };
+
+  const handleCommentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+    if (!newComment.trim()) return;
+
+    setIsSubmittingComment(true);
+    try {
+      const result = await movieService.addComment(id!, user.name, user.email, newComment);
+      if (result.comment) {
+        setNewComment('');
+        alert('Tactical feedback transmitted. Pending command approval.');
+      }
+    } catch (error) {
+      console.error("Error submitting comment:", error);
+    } finally {
+      setIsSubmittingComment(false);
+    }
+  };
 
   const fetchLegalSources = async (title: string) => {
     setSearchingSources(true);
@@ -96,9 +150,9 @@ const MovieDetailPage: React.FC<MovieDetailPageProps> = ({ user, setUser }) => {
         currentProgress = 100;
         clearInterval(interval);
         setProgress(100);
-        setTimeout(() => {
+        setTimeout(async () => {
           setIsDownloading(false);
-          const updatedUser = authService.recordDownload(movie!.id);
+          const updatedUser = await authService.recordDownload(movie!.id);
           if (updatedUser) setUser(updatedUser);
           
           const blob = new Blob([`Simulated ${selectedQuality} Secure Stream Output`], { type: 'text/plain' });
@@ -124,22 +178,23 @@ const MovieDetailPage: React.FC<MovieDetailPageProps> = ({ user, setUser }) => {
   );
 
   // Extract Video ID for the fallback link
-  const videoIdMatch = movie.trailerUrl.match(/embed\/([^/?]+)/);
-  const youtubeLink = videoIdMatch ? `https://www.youtube.com/watch?v=${videoIdMatch[1]}` : movie.trailerUrl;
+  const playerUrl = movie.videoUrl || movie.trailerUrl;
+  const videoIdMatch = playerUrl.match(/embed\/([^/?]+)/);
+  const youtubeLink = videoIdMatch ? `https://www.youtube.com/watch?v=${videoIdMatch[1]}` : playerUrl;
   const origin = window.location.origin;
 
   return (
     <div className="bg-[#05070a] min-h-screen pt-24 pb-24 selection:bg-blue-600 selection:text-white">
-      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-12">
-        
-        {/* Optimized Cinematic Player Container */}
-        <div className="w-full mb-12">
-          <div className="video-container-constrained rounded-[30px] md:rounded-[40px] group ring-1 ring-white/5 relative overflow-hidden">
+      
+      {/* Optimized Cinematic Player Container - Moved outside main container for maximum width */}
+      <div className="w-full mb-12 flex flex-col items-center">
+        <div className="w-full px-0">
+          <div className="video-container-constrained group ring-1 ring-white/5 relative overflow-hidden">
             <div className={`w-full h-full ${isCinematicMode ? 'video-high-fidelity' : ''}`}>
               <iframe 
                 width="100%" 
                 height="100%" 
-                src={`${movie.trailerUrl}?autoplay=0&rel=0&modestbranding=1&origin=${encodeURIComponent(origin)}&enablejsapi=1`} 
+                src={`${playerUrl}?autoplay=0&rel=0&modestbranding=1&origin=${encodeURIComponent(origin)}&enablejsapi=1`} 
                 title={movie.title}
                 frameBorder="0" 
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
@@ -164,41 +219,43 @@ const MovieDetailPage: React.FC<MovieDetailPageProps> = ({ user, setUser }) => {
               </button>
             </div>
           </div>
-
-          <div className="flex flex-col sm:flex-row justify-between items-center mt-8 px-4 gap-6 max-w-[1400px] mx-auto">
-             <div className="flex items-center gap-4">
-               <span className="text-slate-600 text-[9px] font-black uppercase tracking-[0.4em]">Multi-Node Delivery System</span>
-               <div className="h-0.5 w-12 bg-blue-600 rounded-full"></div>
-             </div>
-             <div className="flex gap-6 items-center">
-                <a 
-                  href={youtubeLink} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="bg-white/5 border border-white/5 text-[8px] font-black uppercase tracking-widest text-slate-400 hover:text-white px-4 py-2 rounded-xl transition-all flex items-center gap-2"
-                >
-                  <i className="fa-brands fa-youtube text-red-600"></i>
-                  Watch on YouTube
-                </a>
-                <div className="flex bg-white/5 p-1 rounded-xl border border-white/5">
-                  {(['720p', '1080p', '4K'] as Resolution[]).map((res) => (
-                    <button
-                      key={res}
-                      onClick={() => setSelectedQuality(res)}
-                      className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${selectedQuality === res ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                    >
-                      {res}
-                    </button>
-                  ))}
-                </div>
-                <div className="h-6 w-[1px] bg-slate-800"></div>
-                <button onClick={handleShare} className="text-slate-400 hover:text-white transition-colors text-lg">
-                  <i className="fa-solid fa-share-nodes"></i>
-                </button>
-             </div>
-          </div>
         </div>
 
+        <div className="w-full max-w-[1800px] flex flex-col sm:flex-row justify-between items-center mt-8 px-8 sm:px-12 gap-6">
+           <div className="flex items-center gap-4">
+             <span className="text-slate-600 text-[9px] font-black uppercase tracking-[0.4em]">Multi-Node Delivery System</span>
+             <div className="h-0.5 w-12 bg-blue-600 rounded-full"></div>
+           </div>
+           <div className="flex gap-6 items-center">
+              <a 
+                href={youtubeLink} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="bg-white/5 border border-white/5 text-[8px] font-black uppercase tracking-widest text-slate-400 hover:text-white px-4 py-2 rounded-xl transition-all flex items-center gap-2"
+              >
+                <i className="fa-brands fa-youtube text-red-600"></i>
+                Watch on YouTube
+              </a>
+              <div className="flex bg-white/5 p-1 rounded-xl border border-white/5">
+                {(['720p', '1080p', '4K'] as Resolution[]).map((res) => (
+                  <button
+                    key={res}
+                    onClick={() => setSelectedQuality(res)}
+                    className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${selectedQuality === res ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                  >
+                    {res}
+                  </button>
+                ))}
+              </div>
+              <div className="h-6 w-[1px] bg-slate-800"></div>
+              <button onClick={handleShare} className="text-slate-400 hover:text-white transition-colors text-lg">
+                <i className="fa-solid fa-share-nodes"></i>
+              </button>
+           </div>
+        </div>
+      </div>
+
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-12">
         <div className="flex flex-col lg:flex-row gap-16 mt-4">
           <div className="flex-1">
             <div className="flex flex-wrap items-center gap-4 mb-6 text-blue-500 font-black uppercase tracking-widest text-[9px] italic">
@@ -207,6 +264,11 @@ const MovieDetailPage: React.FC<MovieDetailPageProps> = ({ user, setUser }) => {
                <span>{movie.category}</span>
                <span className="w-1 h-1 rounded-full bg-slate-800"></span>
                <span className="text-white bg-orange-600 px-2.5 py-1 rounded-full text-[7px] shadow-lg uppercase tracking-widest font-black italic">{selectedQuality === '720p' ? 'Data Saver' : 'Premium Quality'}</span>
+               <span className="w-1 h-1 rounded-full bg-slate-800"></span>
+               <span className="text-slate-400 flex items-center gap-1">
+                 <i className="fa-solid fa-eye text-blue-500"></i>
+                 {views.toLocaleString()} VIEWS
+               </span>
             </div>
             
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-white mb-6 leading-[0.9] uppercase italic tracking-tighter transition-all">
@@ -216,6 +278,27 @@ const MovieDetailPage: React.FC<MovieDetailPageProps> = ({ user, setUser }) => {
             <p className="text-slate-400 text-lg leading-relaxed mb-10 font-medium italic border-l-4 border-blue-600 pl-6 max-w-3xl opacity-80">
               {movie.description}
             </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-12">
+              <div className="bg-white/5 p-6 rounded-3xl border border-white/5 flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-blue-600/10 flex items-center justify-center text-blue-500">
+                  <i className="fa-solid fa-user-tie"></i>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-[8px] font-black uppercase tracking-widest mb-0.5">Commanding Director</p>
+                  <p className="text-white font-black italic uppercase tracking-tight">{movie.director || 'Unknown Operative'}</p>
+                </div>
+              </div>
+              <div className="bg-white/5 p-6 rounded-3xl border border-white/5 flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-orange-600/10 flex items-center justify-center text-orange-500">
+                  <i className="fa-solid fa-earth-africa"></i>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-[8px] font-black uppercase tracking-widest mb-0.5">Node Origin</p>
+                  <p className="text-white font-black italic uppercase tracking-tight">{movie.country || 'Global Network'}</p>
+                </div>
+              </div>
+            </div>
 
             <div className="flex flex-wrap gap-5 mb-12">
               <button 
@@ -268,6 +351,61 @@ const MovieDetailPage: React.FC<MovieDetailPageProps> = ({ user, setUser }) => {
                    )}
                  </div>
                ) : <div className="text-slate-800 italic font-black uppercase tracking-[0.4em] text-[9px]">Analyzing optimal high-bandwidth routes for {movie.title}...</div>}
+            </div>
+
+            {/* Comment Section */}
+            <div className="p-8 bg-[#11141b]/40 rounded-[35px] border border-white/10 backdrop-blur-3xl mb-10 shadow-2xl">
+              <h3 className="text-xl font-black text-white uppercase italic tracking-tight flex items-center gap-3 mb-8">
+                <i className="fa-solid fa-comments text-blue-500 text-sm"></i> Operative Feedback
+              </h3>
+
+              <form onSubmit={handleCommentSubmit} className="mb-10">
+                <div className="relative">
+                  <textarea 
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder={user ? "Share your tactical assessment..." : "Log in to provide feedback"}
+                    disabled={!user || isSubmittingComment}
+                    className="w-full bg-black/50 border border-white/5 rounded-2xl px-8 py-5 text-white focus:border-blue-500 outline-none font-medium italic text-slate-400 transition-all resize-none h-32"
+                  ></textarea>
+                  <button 
+                    type="submit"
+                    disabled={!user || isSubmittingComment || !newComment.trim()}
+                    className="absolute bottom-4 right-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl"
+                  >
+                    {isSubmittingComment ? <i className="fa-solid fa-circle-notch animate-spin"></i> : 'Transmit'}
+                  </button>
+                </div>
+              </form>
+
+              <div className="space-y-6 max-h-[500px] overflow-y-auto pr-4 no-scrollbar">
+                {comments.length > 0 ? (
+                  comments.map((comment) => (
+                    <div key={comment.id} className="bg-white/5 p-6 rounded-2xl border border-white/5 animate-in fade-in slide-in-from-left-4 duration-500">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-orange-500 p-0.5">
+                            <div className="w-full h-full rounded-[6px] bg-[#05070a] flex items-center justify-center text-[10px] font-black text-white">
+                              {comment.username[0]}
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-black text-white uppercase tracking-widest italic">{comment.username}</span>
+                        </div>
+                        <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">
+                          {new Date(comment.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className="text-slate-400 text-xs leading-relaxed font-medium italic">
+                        {comment.comment_text}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-10">
+                    <p className="text-slate-600 text-[10px] font-black uppercase tracking-[0.5em]">No tactical feedback recorded for this node</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
